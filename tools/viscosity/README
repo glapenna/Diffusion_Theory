@@ -1,0 +1,7 @@
+
+To build solveSF:
+> ./comp.sh
+
+To buil other tools, ex. acf:
+> gfortran acf.f90
+> mv a.out ../../../bin/acf
