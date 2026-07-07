@@ -1,0 +1,20 @@
+
+bin2xtc_aa.c
+ convert plain binary format to xtc format (and viceversa).
+
+bin2xtc_cg.c
+ convert xtc format to plain binary (and viceversa), reducing the number of sites using geometry centers.
+ change ngrp in the code
+
+Copy bin2xtc_xy.c to bin2xtc.c
+> make all; make install
+
+usage:
+> ./bin2xtc source destination direction precision skip_configurations step
+
+source = bin/xtc file (this must exist)
+destination = xtc/bin file (this is created)
+direction = 1 xtc to bin; -1 bin to xtc
+precision = number of digits, 1000 is for 3 digits, i.e. real is 0.xyz
+skip_configurations = skip this number of configurations in conversion
+step = skip step-1 configurations after one conversion. Starts from first (after skip)
