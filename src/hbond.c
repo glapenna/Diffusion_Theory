@@ -1,0 +1,637 @@
+
+/************************************************************************
+*                            AMBER                                     **
+*                                                                      **
+* Copyright (c) 1986, 1991 Regents of the University of California     **
+*                       All Rights Reserved.                           ** 
+*                                                                      **
+*  This software provided pursuant to a license agreement containing   **
+*  restrictions on its disclosure, duplication, and use. This software **
+*  contains confidential and proprietary information, and may not be   **
+*  extracted or distributed, in whole or in part, for any purpose      **
+*  whatsoever, without the express written permission of the authors.  **
+*  This notice, and the associated author list, must be attached to    **
+*  all copies, or extracts, of this software. Any additional           **
+*  restrictions set forth in the license agreement also apply to this  **
+*  software.                                                           **
+*************************************************************************/
+#include "head.h"
+
+/*
+ * HBOND stuff
+ *
+ *	NOTE: Atom types implicated in hbonding are based on Amber AtomSym
+ *		type names included in parm89a.dat Nov 1990
+ */
+
+#define DBG
+
+/* default criteria */
+#define HBCUT		3.0
+#define HBANGLE		2.356
+
+// extern	char		tok[];
+// char		tok[];
+// void *get2(int,int);
+extern int		it;
+extern statstruct	nullstat;
+
+idstruct		*startid(), *getstruct();
+char			*get();
+setstruct		*getsetaddr();
+
+void	alldonors(), allacceptors();
+
+/***********************************************************************
+ 							INITHBOND()
+************************************************************************/
+
+/*
+ * inithbond() - set up hbond idstruct in idqueue
+ */
+
+void
+inithbond()
+{
+	idstruct	*hbptr;
+	char		id[TOKLEN];
+	char		fname[TOKLEN+4];
+	int		exists;
+
+	/*
+	 *  put hb record in idlist & fill in file name
+	 */
+
+	hbptr = startid(HBOND, id);
+
+	gettok();
+	if (iskeywd())
+		inerr("HBOND: expected file name, got keyword: ", tok);
+	/* TODO: if no files involved user must put a dummy name */
+	strcpy(hbptr->idunion.hb.filename, tok);
+
+	/*
+	 * for now only: (1) complete table format w/ max # columns &/or
+	 *		 (2) hbond list
+	 */
+
+	hbptr->idunion.hb.table = NULL;
+	hbptr->idunion.hb.list = NULL;
+	hbptr->idunion.hb.donor1 = NULL;
+	hbptr->idunion.hb.donor2 = NULL;
+	hbptr->idunion.hb.acceptor = NULL;
+	hbptr->idunion.hb.solv1 = 0;
+
+	for(;;) {
+		gettok();
+		if (tok[0] == ';') {
+			if (hbptr->idunion.hb.table == NULL  &&
+					hbptr->idunion.hb.list == NULL)
+			    printf("HBOND: only calculating %% occupancy\n");
+			break;
+		} else if (!strcmp(tok, "TABLE")) {
+
+			if (hbptr->idunion.hb.table != NULL)
+				inerr("HBOND - 2 TABLE statements","");
+
+			/*
+			 *  open the file
+			 */
+
+			sprintf(fname, "%s.tab", hbptr->idunion.hb.filename);
+			if (fileprob(fname, 0, &exists, "HBOND"))
+				exit(1);
+			if ((hbptr->idunion.hb.table = 
+				  fopen(fname, "w")) == NULL){
+				perror(fname);
+				exit(1);
+			}
+		} else if (!strcmp(tok, "LIST")) {
+
+			if (hbptr->idunion.hb.list != NULL)
+				inerr("HBOND - 2 LIST statements","");
+
+			/*
+			 *  open the file 
+			 */
+
+			sprintf(fname, "%s.lis", hbptr->idunion.hb.filename);
+			if (fileprob(fname, 0, &exists, "HBOND"))
+				exit(1);
+			if ((hbptr->idunion.hb.list = 
+				  fopen(fname, "w")) == NULL) {
+				perror(fname);
+				exit(1);
+			}
+		} else
+			inerr("HBOND: unexpected token", "");
+	}
+}
+
+
+/*
+ *  AtomRes() - make a correct AtomRes mapping to speed up res lookups
+ */
+
+int *
+AtomRes(set)
+setstruct	*set;
+{
+	int	at, res, *list;
+	int	*ipres = set->prm->Ipres;
+
+	list = (int *) get(sizeof(int) * set->max);
+	res = 0;
+	for (at=0; at<set->max; at++) {
+		if (at+1 == ipres[res+1])	/* atom is 1st of next res */
+			res++;
+		list[at] = res;
+/*
+printf("%d %d /", at, res);
+if (!(at % 10)) printf("\n");
+*/
+	}
+	return(list);
+}
+
+
+/************************************************************************
+							SETUPHB()
+*************************************************************************/
+
+/*
+ * setuphb() - look up hb id in idqueue and build its donor & acceptor lists
+ */
+
+void
+setuphb()
+{
+	idstruct	*hbptr, *grptr;
+	setstruct	*set;
+	int		i, grouponly = 0, nogrouponly = 0, bigstat = 0,statsize;
+
+	/*
+	 * get hb struct
+	 */
+
+	gettok();
+	if ((hbptr = getstruct(tok)) == NULL)
+		inerr("HBOND: no such id: ", tok);
+	if (hbptr->id_type != HBOND)
+		inerr("HBOND: id isn't hbond: ", tok);
+
+	if (hbptr->id_setup)
+		inerr("HBOND id multiply referenced in OUTPUT: ", tok);
+
+	/*
+	 *  bind to stream
+	 */
+
+	set = getsetaddr();	/* leaves tok outstanding */
+	hbptr->idunion.hb.set = set;
+	
+	/*
+	 *  get any cutoffs + build donor & acceptor lists
+	 */
+
+	hbptr->idunion.hb.cut = HBCUT;
+	hbptr->idunion.hb.angle = HBANGLE;
+	hbptr->idunion.hb.distat = NULL;
+	hbptr->idunion.hb.angstat = NULL;
+
+	for (;;) {
+		/*
+	 	 * all cases except ';' leave tok outstanding
+		 */
+
+		if (tok[0] == ';') {
+			break;
+		} else if (!strcmp(tok, "DISTANCE")) {
+			gettok();
+			if (tok[0] == '-')   /* '-' is a non-numerical token */
+				inerr("HBOND: expected positive DISTANCE","");
+			if (!tokREAL(&hbptr->idunion.hb.cut))
+				inerr("HBOND: expected REAL # for DISTANCE","");
+			if (!(hbptr->idunion.hb.cut > 0.0))
+				inerr("HBOND: expected positive DISTANCE","");
+			gettok();
+		} else if (!strcmp(tok, "ANGLE")) {
+			gettok();
+			if (tok[0] == '-') {
+				printf("HBOND ANGLE: '-' ignored\n");
+				gettok();
+			}
+			if (!tokREAL(&hbptr->idunion.hb.angle))
+				inerr("HBOND: expected REAL for ANGLE","");
+			if (!(hbptr->idunion.hb.angle > 0.0))
+				inerr("HBOND: expected positive ANGLE","");
+			/* convert to radians */
+			hbptr->idunion.hb.angle = hbptr->idunion.hb.angle 
+				* 3.141593 / 180.0;
+			gettok();
+		} else if (!strcmp(tok, "STATS")) {
+			/* wants in-depth statistics */
+			bigstat++;
+			gettok();
+		} else 
+			inerr(
+			    "HBOND: unexpected token",
+				"");
+	}
+
+	/*
+	 *  fill in unspecified donor/acceptor list with default: all
+	 */
+
+	if (hbptr->idunion.hb.donor1 == NULL)
+		alldonors(hbptr, set);
+	if (hbptr->idunion.hb.acceptor == NULL)
+		allacceptors(hbptr, set);
+
+	/*
+	 *  note 1st atom of solvent to avoid solvent-solvent hbonds
+	TODO: make sure no problem if no solvent
+	 */
+
+	/* hbptr->idunion.hb.solv1 = set->prm->Ipres[set->prm->Iptres-1]; */
+
+	/*
+	 *  allocate space for statistics  
+	TODO: use triangular matrix omitting solv-solu
+	 */
+
+	statsize = hbptr->idunion.hb.nacceptor * hbptr->idunion.hb.ndonor;
+	hbptr->idunion.hb.stat = (int *) get(sizeof(int) * statsize);
+	for (i=0; i<statsize; i++)
+		hbptr->idunion.hb.stat[i] = 0;
+
+	if (bigstat) {
+		hbptr->idunion.hb.distat = (statstruct *) get(
+				sizeof(statstruct) * statsize);
+		hbptr->idunion.hb.angstat = (statstruct *) get(
+				sizeof(statstruct) * statsize);
+		for (i=0; i<statsize; i++) {
+			hbptr->idunion.hb.distat[i] = nullstat;
+			hbptr->idunion.hb.angstat[i] = nullstat;
+		}
+	}
+
+	/*
+	 *  make a correct AtomRes mapping to speed up
+	 *	res lookups
+	 */
+
+	hbptr->idunion.hb.AtomRes = AtomRes(set);
+	hbptr->id_setup++;
+
+	if (hbptr->idunion.hb.table) {
+	    /*
+	     *  if table, write key to columns at the beginning
+	     */
+
+	    int		*donor1  = hbptr->idunion.hb.donor1;
+	    int		*donor2  = hbptr->idunion.hb.donor2;
+	    int		*acceptor = hbptr->idunion.hb.acceptor;
+	    int		ndonor = hbptr->idunion.hb.ndonor;
+	    int		nacc = hbptr->idunion.hb.nacceptor;
+	    int		*AtomRes  = hbptr->idunion.hb.AtomRes;
+	    char	*AtomNames = hbptr->idunion.hb.set->prm->AtomNames;
+	    char	*ResNames  = hbptr->idunion.hb.set->prm->ResNames;
+	    int		j, r1, r2, r3, col = 0;
+
+	    for (i=0; i<ndonor; i++) {
+	   	for (j=0; j<nacc; j++) {
+			if (donor1[i] == acceptor[j])
+				continue;
+			col++;
+	    		r1 = AtomRes[donor1[i]];
+	    		r2 = AtomRes[donor2[i]];
+	    		r3 = AtomRes[acceptor[j]];
+	    		fprintf(hbptr->idunion.hb.table,
+			    "# %d   (%.4s %d %.4s)--(%.4s %d %.4s)",
+				col, &ResNames[r1*ATOMTOKLEN], r1+1, 
+				&AtomNames[donor1[i] * ATOMTOKLEN], 
+				&ResNames[r2*ATOMTOKLEN], r2+1, 
+				&AtomNames[donor2[i] * ATOMTOKLEN]);
+			fprintf(hbptr->idunion.hb.table,
+			    " .. (%.4s %d %.4s)\n",
+				&ResNames[r3*ATOMTOKLEN], r3+1, 
+				&AtomNames[acceptor[j] * ATOMTOKLEN]);
+		}
+	    }
+	}
+}
+
+/************************************************************************
+							ALLDONORS()
+*************************************************************************/
+
+/*
+ * alldonors() - build donor list using all atoms
+ */
+
+void
+alldonors(idstruct *hbptr, setstruct *set)
+{
+	char	hatch;
+	int	i, hat, hyd, ndonor = 0, *list1, *list2;
+	char	*AtomName = set->prm->AtomNames;
+        FILE    *inputf;
+
+        if((inputf=fopen("bondH.list","r"))==NULL)
+        {
+         printf("error opening bondH.list.\n");
+         exit(1);
+        }
+        i=0;
+        while(!feof(inputf)) 
+        {
+         i++;
+         fscanf(inputf,"%*d %*d ");
+        }
+        rewind(inputf);
+        hbptr->idunion.hb.Nbonh=i;
+        printf("hbond: Nbonh= %d\n",i);
+
+	list1 = (int *) get2(hbptr->idunion.hb.Nbonh , sizeof(int));
+	list2 = (int *) get2(hbptr->idunion.hb.Nbonh , sizeof(int));
+	hbptr->idunion.hb.donor1 = list1;
+	hbptr->idunion.hb.donor2 = list2;
+	hbptr->idunion.hb.BondHAt1 = (int *) get2(hbptr->idunion.hb.Nbonh , sizeof(int));
+	hbptr->idunion.hb.BondHAt2 = (int *) get2(hbptr->idunion.hb.Nbonh , sizeof(int));
+
+        i=0;
+        while(!feof(inputf)) 
+        {
+         fscanf(inputf,"%d ",&hbptr->idunion.hb.BondHAt1[i]);
+         fscanf(inputf,"%d ",&hbptr->idunion.hb.BondHAt2[i]);
+         i++;
+        }
+
+	for (i=0; i<hbptr->idunion.hb.Nbonh; i++) {
+
+		/*
+		 *  figure out which BondHAt is the H
+		 */
+
+		if (AtomName[ATOMTOKLEN * (hbptr->idunion.hb.BondHAt2[i]-1)] == 'H') {
+			hyd = hbptr->idunion.hb.BondHAt2[i]-1;
+			hat = hbptr->idunion.hb.BondHAt1[i]-1;
+		} else {
+			hyd = hbptr->idunion.hb.BondHAt1[i]-1;
+			hat = hbptr->idunion.hb.BondHAt2[i]-1;
+		}
+
+		/*
+		 *  compare the bonded H to list of 'wrong' H types
+		 *	(HC, H4) which is shorter than list of 
+		 *	'right' types (H, HS, HO, HW, H3, H2)
+		 */
+
+		hatch = AtomName[ATOMTOKLEN * hyd + 1];
+	
+/*
+		if (hatch == 'C'  ||  hatch == '4')
+			continue;
+*/
+
+		/*
+		 *  the H passed the test: add pair to donor lists
+		 */
+
+		list1[ndonor] = hat;
+		list2[ndonor] = hyd;
+/*
+*/
+printf("hbond: ndonor= %d d1= %c, d2= %c\n",ndonor,AtomName[ATOMTOKLEN*hat],AtomName[ATOMTOKLEN*hyd]);
+		ndonor++;
+
+	}
+	if (!ndonor)
+		inerr("HBOND DONOR: no donor atoms in parm", "");
+	hbptr->idunion.hb.ndonor = ndonor;
+}
+
+/************************************************************************
+							ALLACCEPTORS()
+*************************************************************************/
+
+/*
+ * allacceptors() - build acceptor list using all atoms
+ */
+
+void
+allacceptors(idstruct *hbptr, setstruct *set)
+{
+	int	i, nacc = 0, *list;
+	char	*AtomName = set->prm->AtomNames;
+
+	/*
+	 *  allocate list
+	 */
+
+	list = (int *) get(set->max * sizeof(int));
+	hbptr->idunion.hb.acceptor = list;
+
+	/*
+	 *  look at every atom
+	 */
+
+	for (i=0; i<set->max; i++) {
+
+		if (!strncmp("N", AtomName, 1) ||  
+			  	!strncmp("O", AtomName, 1)) {
+
+			/*
+			 * add to acceptor list
+			 */
+/* printf("hbond: nacc= %d, acc= %.4s\n", nacc,AtomName); */
+			list[nacc++] = i;
+		}
+		AtomName += ATOMTOKLEN;
+	}
+	if (!nacc)
+		inerr("HBOND ACCEPTOR: no acceptor atoms in group", "");
+	hbptr->idunion.hb.nacceptor = nacc;
+}
+
+/************************************************************************
+							HBOND()
+*************************************************************************/
+
+/*
+ * 
+ */
+
+void
+hbond(idstruct *hbptr, idstruct *serptr)
+{
+	int		*d1, *d2, *a, *stat, ndonor, nacc, i, j;
+	_REAL		cut, angle1, distance(), angle(), dd, aa;
+	statstruct	*distat, *angstat;
+	FILE		*table, *list;
+	_REAL		*crd = hbptr->idunion.hb.set->crd;
+	char		*AtomNames = hbptr->idunion.hb.set->prm->AtomNames;
+	char		*ResNames  = hbptr->idunion.hb.set->prm->ResNames;
+	int		*AtomRes  = hbptr->idunion.hb.AtomRes;
+#ifdef PBC
+        _REAL *box = serptr->idunion.ser.set->boxc;
+        _REAL distd[3],dista[3];
+        void images(_REAL *dist, idstruct *serptr);
+        _REAL size(_REAL a[3]),dot(_REAL a[3],_REAL b[3]);
+#endif
+
+	d1 = hbptr->idunion.hb.donor1;
+	d2 = hbptr->idunion.hb.donor2;
+	ndonor = hbptr->idunion.hb.ndonor;
+	nacc = hbptr->idunion.hb.nacceptor;
+
+	cut = hbptr->idunion.hb.cut;
+	angle1 = hbptr->idunion.hb.angle;
+
+	table = hbptr->idunion.hb.table;
+	list = hbptr->idunion.hb.list;
+	stat = hbptr->idunion.hb.stat;
+	distat = hbptr->idunion.hb.distat;
+	angstat = hbptr->idunion.hb.angstat;
+
+	for (i=0; i<ndonor; d1++, d2++, i++) {
+		for (j=0, a=hbptr->idunion.hb.acceptor; j<nacc; a++, j++) {
+			if (*d1 == *a ) {
+				continue;
+			}
+#ifdef PBC
+                        dista[0]=crd[(*d1)*3]-crd[(*a)*3];
+                        dista[1]=crd[(*d1)*3+1]-crd[(*a)*3+1];
+                        dista[2]=crd[(*d1)*3+2]-crd[(*a)*3+2];
+                        images(dista,serptr);
+                        dd = size(dista);
+                        distd[0]=crd[(*d1)*3]-crd[(*d2)*3];
+                        distd[1]=crd[(*d1)*3+1]-crd[(*d2)*3+1];
+                        distd[2]=crd[(*d1)*3+2]-crd[(*d2)*3+2];
+                        images(distd,serptr);
+                        dista[0]=crd[(*a)*3]-crd[(*d2)*3];
+                        dista[1]=crd[(*a)*3+1]-crd[(*d2)*3+1];
+                        dista[2]=crd[(*a)*3+2]-crd[(*d2)*3+2];
+                        images(dista,serptr);
+                        aa = l_acos(dot(distd,dista)/(size(distd)*size(dista)));
+                        if(dd > cut || aa <= angle1)
+#else
+			if ((dd = distance(&crd[*d1 * 3], &crd[*a * 3])) >cut ||
+			  (aa=angle(&crd[*d1 * 3], &crd[*d2 * 3], &crd[*a * 3]))
+							<= angle1) 
+#endif
+                        {
+
+				/*
+				 *  not an hbond
+				 */
+				if (table != NULL  &&  *d1 != *a ) 
+					fprintf(table, "0 ");
+				continue;
+			}
+
+			/*
+			 *  got a live one; log statistics then table/list
+			 */
+
+			stat[nacc*i+j]++;
+
+			if (distat != NULL) {
+				int	idx = nacc*i+j;
+
+				updatestat(&distat[idx], dd);
+				updatestat(&angstat[idx], aa);
+			}
+
+			if (table != NULL)
+				fprintf(table, "1 ");
+			if (list != NULL) {
+			  int	r1 = AtomRes[*d1], r2 = AtomRes[*a];
+
+			  fprintf(list, 
+			        "%d ( %.4s %d %-.4s )( %.4s %d %-.4s ) %f %f\n",
+				it+1, /* *d1, *d2, *a, */
+				&ResNames[r1*ATOMTOKLEN], r1+1, 
+				&AtomNames[*d1 * ATOMTOKLEN], 
+				&ResNames[r2*ATOMTOKLEN], r2+1, 
+				&AtomNames[*a * ATOMTOKLEN], dd, aa * TODEG);
+			}
+		}
+	}
+	if (table != NULL)
+		fprintf(table, "\n");
+}
+
+/************************************************************************
+							CLOSEHB()
+*************************************************************************/
+
+/*
+ * 
+ */
+
+void
+closehb(hbptr)
+idstruct	*hbptr;
+{
+	int		*stat = hbptr->idunion.hb.stat;
+	statstruct	*distat = hbptr->idunion.hb.distat;
+	statstruct	*angstat = hbptr->idunion.hb.angstat;
+	char		*AtomNames = hbptr->idunion.hb.set->prm->AtomNames;
+	char		*ResNames  = hbptr->idunion.hb.set->prm->ResNames;
+	int		*AtomRes  = hbptr->idunion.hb.AtomRes;
+	int		*donor1  = hbptr->idunion.hb.donor1;
+	int		*donor2  = hbptr->idunion.hb.donor2;
+	int		*acceptor = hbptr->idunion.hb.acceptor;
+	int		ndonor = hbptr->idunion.hb.ndonor;
+	int		nacc = hbptr->idunion.hb.nacceptor;
+	int		i, j, idx, r1, r2, r3, col = 0;
+
+	/*
+	 *  close TABLE, LIST files if necc
+	 */
+
+	if (hbptr->idunion.hb.list != NULL)
+		fclose(hbptr->idunion.hb.list);
+	if (hbptr->idunion.hb.table != NULL)
+		fclose(hbptr->idunion.hb.table);
+
+	/*
+	 *  print out stats
+	 */
+
+	printf("HBOND %s stats:\n", hbptr->id_name);
+	for (i=0; i<ndonor; i++) {
+	    for (j=0; j<nacc; j++) {
+		if (donor1[i] == acceptor[j])
+			continue;
+		col++;
+/* to print also zero values, uncomment this line... */
+/*		idx = nacc * i + j; */
+/* ... and comment this line */
+		if (stat[(idx = nacc * i + j)]) 
+		{
+		    r1 = AtomRes[donor1[i]];
+		    r2 = AtomRes[donor2[i]];
+		    r3 = AtomRes[acceptor[j]];
+		    printf(
+"    # %d (%.4s %d %.4s)_(%.4s %d %.4s)..(%.4s %d %.4s) %% occupied: %f\n",
+				col, &ResNames[r1*ATOMTOKLEN], r1+1, 
+				&AtomNames[donor1[i] * ATOMTOKLEN], 
+				&ResNames[r2*ATOMTOKLEN], r2+1, 
+				&AtomNames[donor2[i] * ATOMTOKLEN], 
+				&ResNames[r3*ATOMTOKLEN], r3+1, 
+				&AtomNames[acceptor[j] * ATOMTOKLEN], 
+				100 * (_REAL) stat[idx] / (_REAL) it);
+		    if (distat != NULL) {
+			printf("\tdistance    ");
+			printstat(&distat[idx], 0.0, 0);
+			printf("\tangle(deg)  ");
+			printstat(&angstat[idx], 0.0, 1);
+		    }
+		}
+	    }
+	}
+
+}

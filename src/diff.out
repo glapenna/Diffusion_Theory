@@ -1,0 +1,66 @@
+55a56
+> 	crdptr->idunion.crd.conv = 0;
+69a71,72
+> 		} else if (!strcmp(tok, "REVERSE_FLOAT")) {
+> 			crdptr->idunion.crd.conv = 1;
+311c314,315
+< writecrd(idstruct *idptr, idstruct *lastpass)
+---
+> writecrd(idptr, lastpass)
+> idstruct *idptr;
+314c318
+< 	int		i, j, k, nxyz, box;
+---
+> 	int		i, j, k, nxyz, box,nitems;
+458,461c462,465
+< /*
+< */
+<                 fwrite(&idptr->idunion.crd.natoms,
+<                  sizeof(int),1,file);
+---
+>                 nitems=idptr->idunion.crd.natoms;
+>                 if(idptr->idunion.crd.conv) 
+>                  reverse4ByteOrder(1,(char *)&nitems);
+>                 fwrite(&nitems,sizeof(int),1,file);
+466a471,472
+>                 if(idptr->idunion.crd.conv) 
+>                  reverse4ByteOrder(3,(char *)boxc_s);
+472a479,481
+>                 if(idptr->idunion.crd.conv) 
+>                  reverse4ByteOrder(3*idptr->idunion.crd.natoms,
+>                   (char *)idptr->idunion.crd.set->crd_s);
+477,500d485
+< /*
+<                 { float dt;
+<                   int byteso,bytes;
+<                 dt=0.;
+<                 byteso=6004;
+<                 bytes=byteso;
+<                 reverse4ByteOrder(1,(char *)&bytes);
+<                 fwrite(&bytes, sizeof(int),1,file);
+<                 reverse4ByteOrder(1,(char *)&dt);
+<                 fwrite(&dt,
+<                  sizeof(float),1,file);
+<                 for(i=0;i<3*idptr->idunion.crd.natoms;i++) {
+<                  idptr->idunion.crd.set->crd_s[i]=
+<                   (float)idptr->idunion.crd.set->crd[i];
+<                 }
+<                 reverse4ByteOrder(idptr->idunion.crd.natoms,
+<                  (char *)idptr->idunion.crd.set->crd_s);
+<                 fwrite(idptr->idunion.crd.set->crd_s,
+<                  3*idptr->idunion.crd.natoms*sizeof(float),
+<                   1,file);
+<                 fwrite(&bytes, sizeof(int),1,file);
+<                 }
+< */
+< 
+577c562,563
+< newpath(char *path, char *base)
+---
+> newpath(path, base)
+> char	*path, *base;
+611c597,598
+< closecrd(idstruct *crdpt)
+---
+> closecrd(crdpt)
+> idstruct	*crdpt;

@@ -1,0 +1,1373 @@
+#include "head.h"
+
+// extern char		tok[];
+// char		tok[];
+// void *get2(int,int);
+
+/**** extern ****/
+extern idstruct		*startid(),*getstruct();
+
+rotstruct **rot_matrix();
+
+/************************************************************************/
+
+void
+init_mca_p2()
+{
+	idstruct	*dptr;
+	char		id[TOKLEN];
+	int		exists;
+
+	dptr = startid(MCA_P2, id);
+
+	dptr->idunion.mca_p2.cases = 0;
+	dptr->idunion.mca_p2.casesw = 0.;
+	dptr->idunion.mca_p2.dump = 1;
+	dptr->idunion.mca_p2.order = 1;
+	dptr->idunion.mca_p2.rigid = 0;
+	dptr->idunion.mca_p2.sel_modes = 3;
+
+	/* 'file_name' */
+
+	gettok();
+	if (iskeywd())
+		inerr("MCA_P2: expected file name","");
+	strcpy(dptr->idunion.mca_p2.fname, tok);
+
+	/*
+	 *  open the file(s)
+	 */
+
+	if (fileprob(dptr->idunion.mca_p2.fname, 0, &exists, "MCA_P2"))
+		exit(1);
+	if ((dptr->idunion.mca_p2.file = 
+				  fopen(dptr->idunion.mca_p2.fname, "w")) == NULL){
+		perror(dptr->idunion.mca_p2.fname);
+		exit(1);
+	}
+	gettok();
+
+/*
+printf("dptr %d id %s\n", dptr, dptr->id_name);
+*/
+}
+
+/************************************************************************/
+
+void
+setup_mca_p2()
+{
+	idstruct	*dptr,*bptr;
+	int i,j,k,offset_r,nt,nt2;
+
+/* get id */
+        gettok();
+        if ((dptr = getstruct(tok)) != NULL) {
+                if (dptr->id_type != MCA_P2)
+                        inerr("setup_mca_p2: expected id or keyword\n","");
+        } else {
+                printf("setup_mca_p2: id %s not found in idlist\n", tok);
+        }
+        gettok();
+        if ((bptr = getstruct(tok)) == NULL) 
+                inerr("setup_mca_p2: no such id\n","");
+        if (bptr->id_type != BEAD)
+                inerr("setup_mca_p2: bead id expected\n","");
+
+        dptr->idunion.mca_p2.type = 1;
+        dptr->idunion.mca_p2.sel_bonds_order1 = 1;
+        dptr->idunion.mca_p2.sel_bonds_order2 = 1;
+
+        gettok();
+        for(;;) {
+         if(tok[0]==';') {
+          break;
+         } else if(!strcmp(tok,"READFSI")) {
+          dptr->idunion.mca_p2.dump=-1;
+          gettok();
+         } else if(!strcmp(tok,"LOCAL")) {
+          dptr->idunion.mca_p2.type=1;
+          gettok();
+         } else if(!strcmp(tok,"RIGID")) {
+          dptr->idunion.mca_p2.rigid=1;
+          gettok();
+         } else if(!strcmp(tok,"NMODES")) {
+          gettok();
+          tokint(&dptr->idunion.mca_p2.sel_modes,tok);
+          dptr->idunion.mca_p2.type=2;
+          gettok();
+         } else if(!strcmp(tok,"ORDER")) {
+          gettok();
+          tokint(&dptr->idunion.mca_p2.order,tok);
+          gettok();
+         } else if(!strcmp(tok,"NBONDS_ORDER1")) {
+          gettok();
+          tokint(&dptr->idunion.mca_p2.sel_bonds_order1,tok);
+          gettok();
+         } else if(!strcmp(tok,"NBONDS_ORDER2")) {
+          gettok();
+          tokint(&dptr->idunion.mca_p2.sel_bonds_order2,tok);
+          gettok();
+         } else {
+          printf("setup_mca_p2: option not found.\n");
+          exit(1);
+         }
+        }
+
+        dptr->idunion.mca_p2.bead = bptr;
+
+        dptr->idunion.mca_p2.n0=
+         bptr->idunion.bead.nbond;
+
+        dptr->idunion.mca_p2.n1=
+         dptr->idunion.mca_p2.n0;
+       dptr->idunion.mca_p2.n2=0;
+       nt=0;
+       nt2=0;
+
+        bptr->idunion.bead.l->offset_l = (int *)
+          get2(dptr->idunion.mca_p2.n0,sizeof(int));
+        bptr->idunion.bead.l->doffset = (int *)
+          get2(dptr->idunion.mca_p2.n0,sizeof(int));
+        if(dptr->idunion.mca_p2.order==2) 
+        {
+         bptr->idunion.bead.l->offset_l2 = (int *)
+          get2(dptr->idunion.mca_p2.n0,sizeof(int));
+         bptr->idunion.bead.l->doffset2 = (int *)
+          get2(dptr->idunion.mca_p2.n0,sizeof(int));
+        }
+
+        for(i=0;i<bptr->idunion.bead.nbond;i++) {
+         bptr->idunion.bead.l->offset_l[i]= 0;
+                  offset_r   = dptr->idunion.mca_p2.sel_bonds_order1 -1;
+         bptr->idunion.bead.l->doffset[i]=  offset_r
+                               +bptr->idunion.bead.l->offset_l[i] +1;
+         if(i+offset_r > bptr->idunion.bead.nbond-1)
+         {
+                            offset_r   -=i+1
+                                        +dptr->idunion.mca_p2.sel_bonds_order1-1
+                                        -bptr->idunion.bead.nbond;
+         }
+         bptr->idunion.bead.l->doffset[i]=  offset_r
+                                        +bptr->idunion.bead.l->offset_l[i] +1;
+         // printf("offset(%d)= %d %d \n",
+         //  i,bptr->idunion.bead.l->offset_l[i],bptr->idunion.bead.l->doffset[i]);
+
+         if(dptr->idunion.mca_p2.order==2)
+         {
+
+         bptr->idunion.bead.l->offset_l2[i]= 
+           dptr->idunion.mca_p2.sel_bonds_order2 -1;
+         offset_r   = dptr->idunion.mca_p2.sel_bonds_order2 -1;
+         if(i-bptr->idunion.bead.l->offset_l2[i] < 0)
+         {
+          bptr->idunion.bead.l->offset_l2[i]-=
+           dptr->idunion.mca_p2.sel_bonds_order2-i-1;
+         }
+         if(i+offset_r > bptr->idunion.bead.nbond-1)
+         {
+                            offset_r   -=i+1
+                                        +dptr->idunion.mca_p2.sel_bonds_order2-1
+                                        -bptr->idunion.bead.nbond;
+         }
+         bptr->idunion.bead.l->doffset2[i]=  offset_r
+                                        +bptr->idunion.bead.l->offset_l2[i] +1;
+        // printf("offset(%d)= %d %d %d %d\n",
+        //  i,bptr->idunion.bead.l->offset_l[i],bptr->idunion.bead.l->doffset[i],
+        //    bptr->idunion.bead.l->offset_l2[i],bptr->idunion.bead.l->doffset2[i]);
+        // fflush(stdout);
+
+         nt2 += bptr->idunion.bead.l->doffset[i]*
+                bptr->idunion.bead.l->doffset2[i]*(bptr->idunion.bead.l->doffset2[i]+1)/2;
+
+         }
+
+         nt += bptr->idunion.bead.l->doffset[i];
+        }
+
+        dptr->idunion.mca_p2.n1=nt;
+        dptr->idunion.mca_p2.n2=nt2;
+
+        printf("setup_mca_p2: nt:   %d\n",nt);
+        printf("setup_mca_p2: nt2:  %d\n",nt2);
+
+        dptr->idunion.mca_p2.dim1=
+         dptr->idunion.mca_p2.n1*(dptr->idunion.mca_p2.n1+1)/2;
+        dptr->idunion.mca_p2.s1 = (_REAL *)
+          get2(dptr->idunion.mca_p2.dim1,sizeof(_REAL));
+        dptr->idunion.mca_p2.f1 = (_REAL *)
+          get2(dptr->idunion.mca_p2.dim1,sizeof(_REAL));
+        printf("setup_mca_p2: n1:    %d\n",dptr->idunion.mca_p2.n1);
+        printf("setup_mca_p2: dim1:  %d\n",dptr->idunion.mca_p2.dim1);
+        for(i=0;i<dptr->idunion.mca_p2.dim1;i++) {
+         *dptr->idunion.mca_p2.s1++ =0.;
+         *dptr->idunion.mca_p2.f1++ =0.;
+        }
+        dptr->idunion.mca_p2.s1-=dptr->idunion.mca_p2.dim1;
+        dptr->idunion.mca_p2.f1-=dptr->idunion.mca_p2.dim1;
+        dptr->idunion.mca_p2.l12 = (mod12struct *)
+          get2(dptr->idunion.mca_p2.n1,sizeof(mod12struct));
+
+        if(dptr->idunion.mca_p2.order==2)
+        {
+        dptr->idunion.mca_p2.dim12=
+         dptr->idunion.mca_p2.n1*dptr->idunion.mca_p2.n2;
+        printf("setup_mca_p2: n2:    %d\n",dptr->idunion.mca_p2.n2);
+        printf("setup_mca_p2: dim12: %d\n",dptr->idunion.mca_p2.dim12);
+        dptr->idunion.mca_p2.s12 = (_REAL *)
+          get2(dptr->idunion.mca_p2.dim12,sizeof(_REAL));
+        dptr->idunion.mca_p2.f12 = (_REAL *)
+          get2(dptr->idunion.mca_p2.dim12,sizeof(_REAL));
+        for(i=0;i<dptr->idunion.mca_p2.dim12;i++) {
+         *dptr->idunion.mca_p2.s12++ =0.;
+         *dptr->idunion.mca_p2.f12++ =0.;
+        }
+        dptr->idunion.mca_p2.s12-=dptr->idunion.mca_p2.dim12;
+        dptr->idunion.mca_p2.f12-=dptr->idunion.mca_p2.dim12;
+
+        dptr->idunion.mca_p2.dim2=
+         dptr->idunion.mca_p2.n2*(dptr->idunion.mca_p2.n2+1)/2;
+        printf("setup_mca_p2: dim2:  %d\n",dptr->idunion.mca_p2.dim2);
+        dptr->idunion.mca_p2.s2 = (_REAL *)
+          get2(dptr->idunion.mca_p2.dim2,sizeof(_REAL));
+        dptr->idunion.mca_p2.f2 = (_REAL *)
+          get2(dptr->idunion.mca_p2.dim2,sizeof(_REAL));
+        for(i=0;i<dptr->idunion.mca_p2.dim2;i++) {
+         *dptr->idunion.mca_p2.s2++ =0.;
+         *dptr->idunion.mca_p2.f2++ =0.;
+        }
+        dptr->idunion.mca_p2.s2-=dptr->idunion.mca_p2.dim2;
+        dptr->idunion.mca_p2.f2-=dptr->idunion.mca_p2.dim2;
+        dptr->idunion.mca_p2.l1234 = (mod1234struct *)
+          get2(dptr->idunion.mca_p2.n2,sizeof(mod1234struct));
+        }
+
+        dptr->idunion.mca_p2.nn=dptr->idunion.mca_p2.n1+dptr->idunion.mca_p2.n2;
+
+        printf("setup_mca_p2: nn:    %d\n",dptr->idunion.mca_p2.nn);
+
+        dptr->idunion.mca_p2.Fb = rot_matrix
+         (0,bptr->idunion.bead.nbond-1,0,bptr->idunion.bead.nbond-1);
+
+}
+
+/************************************************************************/
+
+do_first_p2(idstruct *objptr,idstruct *serptr)
+{
+   _REAL *box=serptr->idunion.ser.set->boxc;
+   idstruct *bptr;
+   int nbond, *offset_l, *doffset, *offset_l2, *doffset2;
+   int i,j,kk,l,i1,i2,i3,i4,j1,j2,j3,j4,j1_0,j2_0,j3_0,j4_0,
+       ib,jb,k,m1,m2,overlap,
+       i1_0,i2_0,i3_0,i4_0,i1_1,i2_1,i3_1,i4_1,j1_1,j2_1,j3_1,j4_1,
+       xx;
+   _REAL **r1, **r2;
+   _REAL *rt1,*rt2,zi,zj,zr,cutsq;
+   _REAL boxm1[3],x1,y1,z1,x2,y2,z2,dx,dy,dz,scp;
+   bondstruct *lb1, *lb2, *lb,*p1,*p2,*p3,*p4;
+   mod12struct *l12,*l12_1,*l12_2;
+   mod1234struct *l1234,*l1234_1,*l1234_2;
+   _REAL sig0r,f[5][5],b,c,weight;
+
+   sig0r=serptr->idunion.ser.prm->sig0r;
+   bptr=objptr->idunion.mca_p2.bead;
+   zr=bptr->idunion.bead.zr;
+   cutsq=bptr->idunion.bead.cutsq;
+   nbond=bptr->idunion.bead.nbond;
+   offset_l=bptr->idunion.bead.l->offset_l;
+   doffset=bptr->idunion.bead.l->doffset;
+   offset_l2=bptr->idunion.bead.l->offset_l2;
+   doffset2=bptr->idunion.bead.l->doffset2;
+
+/*   printf("do_first_m1: nbond: %d\n",bptr->idunion.bead.nbond); */
+
+   if(serptr->idunion.ser.iweight)
+   {
+    weight=serptr->idunion.ser.w->idunion.serw.w;
+   } else {
+    weight=1.;
+   }
+   for(k=0;k<3;k++) {
+    boxm1[k]=1./box[k];
+   }
+   b=l_sqrt(3./8.);
+   c=0.5;
+
+   ++objptr->idunion.mca_p2.cases;
+   objptr->idunion.mca_p2.casesw+=weight;
+
+   lb=bptr->idunion.bead.l;
+   r1=bptr->idunion.bead.r1;
+   r2=bptr->idunion.bead.r2;
+   for (i=0;i<bptr->idunion.bead.nbond;i++,r1++,r2++) {
+    rt1=*r1; rt2=*r2;
+    x1=rt1[0]; y1=rt1[1]; z1=rt1[2];
+    x2=rt2[0]; y2=rt2[1]; z2=rt2[2];
+/*
+   printf("do_first_m1:r1: %e %e %e\n",sig0r*x1,sig0r*y1,sig0r*z1);
+   printf("do_first_m1:r2: %e %e %e\n",sig0r*x2,sig0r*y2,sig0r*z2);
+*/
+
+    dx=x1-x2;
+    dy=y1-y2;
+    dz=z1-z2;
+    lb->id1 = (int)(*r1);
+    lb->id2 = (int)(*r2);
+    lb->x1 = x1;
+    lb->x2 = x2;
+    lb->y1 = y1;
+    lb->y2 = y2;
+    lb->z1 = z1;
+    lb->z2 = z2;
+    lb->x = dx;
+    lb->y = dy;
+    lb->z = dz;
+    lb->sq = dx*dx+dy*dy+dz*dz;
+    bptr->idunion.bead.bavt += lb->sq;
+    lb++;
+   }
+   r1-=bptr->idunion.bead.nbond;
+   r2-=bptr->idunion.bead.nbond;
+
+   l12=objptr->idunion.mca_p2.l12;
+   lb=bptr->idunion.bead.l;
+   for (i1=0,p1=lb;i1<nbond;i1++,p1++) {
+    for (i2=0,p2=p1;i2<doffset[i1];i2++,p2++) {
+     scp = p1->x*p2->x+p1->y*p2->y+p1->z*p2->z;
+     l12->phi[0]=c*(3.*p1->z*p2->z - scp);
+     l12->dphidm1[0][0]=-c*p2->x;
+     l12->dphidm1[0][1]=-c*p2->y;
+     l12->dphidm1[0][2]= 2.*c*p2->z;
+     l12->dphidm2[0][0]=-c*p1->x;
+     l12->dphidm2[0][1]=-c*p1->y;
+     l12->dphidm2[0][2]= 2.*c*p1->z;
+     l12->phi[1]=b*(p1->x*p2->x - p1->y*p2->y);
+     l12->dphidm1[1][0]= b*p2->x;
+     l12->dphidm1[1][1]=-b*p2->y;
+     l12->dphidm1[1][2]= 0.;
+     l12->dphidm2[1][0]= b*p1->x;
+     l12->dphidm2[1][1]=-b*p1->y;
+     l12->dphidm2[1][2]= 0.;
+     l12->phi[2]=b*(p1->x*p2->y + p1->y*p2->x);
+     l12->dphidm1[2][0]= b*p2->y;
+     l12->dphidm1[2][1]= b*p2->x;
+     l12->dphidm1[2][2]= 0.;
+     l12->dphidm2[2][0]= b*p1->y;
+     l12->dphidm2[2][1]= b*p1->x;
+     l12->dphidm2[2][2]= 0.;
+     l12->phi[3]=b*(p1->x*p2->z + p1->z*p2->x);
+     l12->dphidm1[3][0]= b*p2->z;
+     l12->dphidm1[3][1]= 0.;
+     l12->dphidm1[3][2]= b*p2->x;
+     l12->dphidm2[3][0]= b*p1->z;
+     l12->dphidm2[3][1]= 0.;
+     l12->dphidm2[3][2]= b*p1->x;
+     l12->phi[4]=b*(p1->y*p2->z + p1->z*p2->y);
+     l12->dphidm1[4][0]= 0.;
+     l12->dphidm1[4][1]= b*p2->z;
+     l12->dphidm1[4][2]= b*p2->y;
+     l12->dphidm2[4][0]= 0.;
+     l12->dphidm2[4][1]= b*p1->z;
+     l12->dphidm2[4][2]= b*p1->y;
+     l12->mod=scp;
+/*
+ printf("i= %d,%d\n",i1+1,i2+1); fflush(stdout);
+ printf("l12= %e\n",l12->dphidm1[0][0]);
+ printf("l12= %e\n",l12->dphidm2[0][0]);
+*/
+     l12++;
+    }
+   }
+
+   if(objptr->idunion.mca_p2.order==2)
+   {
+
+   l12=objptr->idunion.mca_p2.l12;
+   l1234=objptr->idunion.mca_p2.l1234;
+   lb=bptr->idunion.bead.l;
+   for (i1=0,p1=lb;i1<nbond;i1++,p1++) {
+    for (i2=0,p2=p1;i2<doffset[i1];i2++,p2++,l12++) {
+     for (i3=0,p3=p1-offset_l2[i1];i3<doffset2[i1];i3++,p3++) {
+      for (i4=i3,p4=p3;i4<doffset2[i1];i4++,p4++) {
+       scp = p3->x*p4->x+p3->y*p4->y+p3->z*p4->z;
+       l1234->mod=scp*scp;
+       for(k=0;k<5;k++) {
+        l1234->phi[k]=l12->phi[k]*scp;
+        for(kk=0;kk<3;kk++) {
+         l1234->dphidm1[k][kk]=l12->dphidm1[k][kk]*scp;
+         l1234->dphidm2[k][kk]=l12->dphidm2[k][kk]*scp;
+        }
+        l1234->dphidm3[k][0]=l12->phi[k]*p4->x;
+        l1234->dphidm3[k][1]=l12->phi[k]*p4->y;
+        l1234->dphidm3[k][2]=l12->phi[k]*p4->z;
+        l1234->dphidm4[k][0]=l12->phi[k]*p3->x;
+        l1234->dphidm4[k][1]=l12->phi[k]*p3->y;
+        l1234->dphidm4[k][2]=l12->phi[k]*p3->z;
+       }
+       l1234++;
+/* printf("i= %d,%d,%d,%d\n",i1+1,i2+1,i3+1,i4+1); */
+      }
+     }
+    }
+   }
+
+   }
+   /* return; */
+
+
+   lb=bptr->idunion.bead.l;
+/* I-I matrices */
+   for (ib=1,lb1=lb;ib<=nbond;ib++,lb1++) {
+    for (jb=ib,lb2=lb1;jb<=nbond;jb++,lb2++) {
+
+#include "fbb.c"
+
+     objptr->idunion.mca_p2.Fb[ib-1][jb-1].f[0][0]=f[0][0];
+     objptr->idunion.mca_p2.Fb[ib-1][jb-1].f[0][1]=f[0][1];
+     objptr->idunion.mca_p2.Fb[ib-1][jb-1].f[0][2]=f[0][2];
+     objptr->idunion.mca_p2.Fb[ib-1][jb-1].f[1][0]=f[0][1];
+     objptr->idunion.mca_p2.Fb[ib-1][jb-1].f[1][1]=f[1][1];
+     objptr->idunion.mca_p2.Fb[ib-1][jb-1].f[1][2]=f[1][2];
+     objptr->idunion.mca_p2.Fb[ib-1][jb-1].f[2][0]=f[0][2];
+     objptr->idunion.mca_p2.Fb[ib-1][jb-1].f[2][1]=f[1][2];
+     objptr->idunion.mca_p2.Fb[ib-1][jb-1].f[2][2]=f[2][2];
+
+     objptr->idunion.mca_p2.Fb[jb-1][ib-1].f[0][0]=f[0][0];
+     objptr->idunion.mca_p2.Fb[jb-1][ib-1].f[0][1]=f[0][1];
+     objptr->idunion.mca_p2.Fb[jb-1][ib-1].f[0][2]=f[0][2];
+     objptr->idunion.mca_p2.Fb[jb-1][ib-1].f[1][0]=f[0][1];
+     objptr->idunion.mca_p2.Fb[jb-1][ib-1].f[1][1]=f[1][1];
+     objptr->idunion.mca_p2.Fb[jb-1][ib-1].f[1][2]=f[1][2];
+     objptr->idunion.mca_p2.Fb[jb-1][ib-1].f[2][0]=f[0][2];
+     objptr->idunion.mca_p2.Fb[jb-1][ib-1].f[2][1]=f[1][2];
+     objptr->idunion.mca_p2.Fb[jb-1][ib-1].f[2][2]=f[2][2];
+
+    }
+   }
+
+   i=0;
+   kk=0;
+   l12=objptr->idunion.mca_p2.l12;
+   i1_0=0;
+   i1_1=nbond;
+   l12_1=l12;
+   for (i1=i1_0;i1<i1_1;i1++) {
+    i2_0=i1;
+    i2_1=i2_0+doffset[i1];
+    for (i2=i2_0;i2<i2_1;i2++,i++) 
+    {
+     j1_0=i1;
+     j2_0=i2;
+     j1_1=i1_1;
+     j2_1=i2_1;
+     xx=1;
+
+/*
+  printf("i1_0,i2_0,j1_0,j2_0= %d %d %d %d\n", 
+   i1_0,i2_0,j1_0,j2_0);
+  printf("i1_1,i2_1,j1_1,j2_1= %d %d %d %d\n", 
+   i1_1,i2_1,j1_1,j2_1);
+  fflush(stdout);
+*/
+
+  for (j1=j1_0,j=i,l12_2=l12_1;j1<j1_1;j1++)
+   {
+    if(xx==0)
+    {
+     j2_0=j1;
+     j2_1=j2_0+doffset[j1];
+    }
+    xx=0;
+
+    for (j2=j2_0;j2<j2_1;l12_2++,j2++)
+    {
+
+/* printf("j3_1= %d\n",j3_1); */
+
+/*
+  printf("kk= %d\n",kk); 
+  printf("i1,i2,j1,j2= %d %d %d %d\n", 
+   i1+1,i2+1,j1+1,j2+1);
+  fflush(stdout);
+*/
+
+     for(m1=0;m1<5;m1++) {
+      for(m2=0;m2<5;m2++) {
+       f[m1][m2]=0.;
+      }
+     }
+
+     for(m1=0;m1<5;m1++) {
+       {
+       m2=m1;
+       for(k=0;k<3;k++) {
+        for(l=0;l<3;l++) {
+         f[m1][m2]+=
+          l12_1->dphidm1[m1][k] *
+          objptr->idunion.mca_p2.Fb[i1][j1].f[k][l]  *
+          l12_2->dphidm1[m2][l];
+         f[m1][m2]+=
+          l12_1->dphidm1[m1][k] *
+          objptr->idunion.mca_p2.Fb[i1][j2].f[k][l]  *
+          l12_2->dphidm2[m2][l];
+         f[m1][m2]+=
+          l12_1->dphidm2[m1][k] *
+          objptr->idunion.mca_p2.Fb[i2][j1].f[k][l]  *
+          l12_2->dphidm1[m2][l];
+         f[m1][m2]+=
+          l12_1->dphidm2[m1][k] *
+          objptr->idunion.mca_p2.Fb[i2][j2].f[k][l]  *
+          l12_2->dphidm2[m2][l];
+        }
+       }
+      }
+     }
+
+     scp=0.;
+     scp+=f[0][0];
+     scp+=2.*f[1][1];
+     scp+=2.*f[2][2];
+     scp+=2.*f[3][3];
+     scp+=2.*f[4][4];
+     *objptr->idunion.mca_p2.f1 += weight*scp/((_REAL)5);
+     objptr->idunion.mca_p2.f1++;
+
+     scp=0.;
+     scp+=l12_1->phi[0]*l12_2->phi[0];
+     scp+=2.*l12_1->phi[1]*l12_2->phi[1];
+     scp+=2.*l12_1->phi[2]*l12_2->phi[2];
+     scp+=2.*l12_1->phi[3]*l12_2->phi[3];
+     scp+=2.*l12_1->phi[4]*l12_2->phi[4];
+     *objptr->idunion.mca_p2.s1 += weight*scp/((_REAL)5);
+     objptr->idunion.mca_p2.s1++;
+
+     kk++;
+    }
+   }
+    }
+   }
+   objptr->idunion.mca_p2.s1 -= objptr->idunion.mca_p2.dim1;
+   objptr->idunion.mca_p2.f1 -= objptr->idunion.mca_p2.dim1;
+
+   if(objptr->idunion.mca_p2.order==1) return;
+
+   l12=objptr->idunion.mca_p2.l12;
+   i1_0=0;
+   i1_1=nbond;
+   for (i1=i1_0,i=0,kk=0,l12_1=l12;i1<i1_1;i1++) {
+    i2_0=i1;
+    i2_1=i2_0+doffset[i1];
+    for (i2=i2_0;i2<i2_1;i2++,i++,l12_1++) {
+
+     l1234=objptr->idunion.mca_p2.l1234;
+     j1_0=0;
+     j1_1=nbond;
+     for (j1=j1_0,l1234_2=l1234;j1<j1_1;j1++) {
+      j2_0=j1;
+      j2_1=j2_0+doffset[j1];
+      for (j2=j2_0;j2<j2_1;j2++) {
+       j3_0=j1-offset_l2[j1];
+       j3_1=j3_0+doffset2[j1];
+       for (j3=j3_0;j3<j3_1;j3++) {
+        j4_0=j3;
+        j4_1=j3_0+doffset2[j1];
+        for (j4=j4_0;j4<j4_1;j4++,l1234_2++) {
+
+     for(m1=0;m1<5;m1++) {
+      for(m2=0;m2<5;m2++) {
+       f[m1][m2]=0.;
+      }
+     }
+
+     for(m1=0;m1<5;m1++) {
+       {
+       m2=m1;
+       for(k=0;k<3;k++) {
+        for(l=0;l<3;l++) {
+         f[m1][m2]+=
+          l12_1->dphidm1[m1][k] *
+          objptr->idunion.mca_p2.Fb[i1][j1].f[k][l]  *
+          l1234_2->dphidm1[m2][l];
+         f[m1][m2]+=
+          l12_1->dphidm1[m1][k] *
+          objptr->idunion.mca_p2.Fb[i1][j2].f[k][l]  *
+          l1234_2->dphidm2[m2][l];
+         f[m1][m2]+=
+          l12_1->dphidm1[m1][k] *
+          objptr->idunion.mca_p2.Fb[i1][j3].f[k][l]  *
+          l1234_2->dphidm3[m2][l];
+         f[m1][m2]+=
+          l12_1->dphidm1[m1][k] *
+          objptr->idunion.mca_p2.Fb[i1][j4].f[k][l]  *
+          l1234_2->dphidm4[m2][l];
+         f[m1][m2]+=
+          l12_1->dphidm2[m1][k] *
+          objptr->idunion.mca_p2.Fb[i2][j1].f[k][l]  *
+          l1234_2->dphidm1[m2][l];
+         f[m1][m2]+=
+          l12_1->dphidm2[m1][k] *
+          objptr->idunion.mca_p2.Fb[i2][j2].f[k][l]  *
+          l1234_2->dphidm2[m2][l];
+         f[m1][m2]+=
+          l12_1->dphidm2[m1][k] *
+          objptr->idunion.mca_p2.Fb[i2][j3].f[k][l]  *
+          l1234_2->dphidm3[m2][l];
+         f[m1][m2]+=
+          l12_1->dphidm2[m1][k] *
+          objptr->idunion.mca_p2.Fb[i2][j4].f[k][l]  *
+          l1234_2->dphidm4[m2][l];
+
+        }
+       }
+      }
+     }
+
+     scp=0.;
+     scp+=f[0][0];
+     scp+=2.*f[1][1];
+     scp+=2.*f[2][2];
+     scp+=2.*f[3][3];
+     scp+=2.*f[4][4];
+     *objptr->idunion.mca_p2.f12 += weight*scp/((_REAL)5);
+     objptr->idunion.mca_p2.f12++;
+
+     scp=0.;
+     scp+=l12_1->phi[0]*l1234_2->phi[0];
+     scp+=2.*l12_1->phi[1]*l1234_2->phi[1];
+     scp+=2.*l12_1->phi[2]*l1234_2->phi[2];
+     scp+=2.*l12_1->phi[3]*l1234_2->phi[3];
+     scp+=2.*l12_1->phi[4]*l1234_2->phi[4];
+     *objptr->idunion.mca_p2.s12 += weight*scp/((_REAL)5);
+     objptr->idunion.mca_p2.s12++;
+
+        }
+       }
+      }
+     }
+    }
+   }
+   objptr->idunion.mca_p2.s12 -= objptr->idunion.mca_p2.dim12;
+   objptr->idunion.mca_p2.f12 -= objptr->idunion.mca_p2.dim12;
+
+   l1234=objptr->idunion.mca_p2.l1234;
+   i1_0=0;
+   i1_1=nbond;
+   for (i1=i1_0,l1234_1=l1234;i1<i1_1;i1++) {
+    i2_0=i1;
+    i2_1=i2_0+doffset[i1];
+    for (i2=i2_0;i2<i2_1;i2++) {
+     i3_0=i1-offset_l2[i1];
+     i3_1=i3_0+doffset2[i1];
+     for (i3=i3_0;i3<i3_1;i3++) {
+      i4_0=i3;
+      i4_1=i3_0+doffset2[i1];
+      for (i4=i4_0;i4<i4_1;i4++,l1234_1++) {
+
+     j1_0=i1;
+     j2_0=i2;
+     j1_1=i1_1;
+     j2_1=i2_1;
+     j3_0=i3;
+     j4_0=i4;
+     j3_1=i3_1;
+     j4_1=i4_1;
+     xx=1;
+
+/*
+  printf("i1_0,i2_0,j1_0,j2_0= %d %d %d %d\n", 
+   i1_0,i2_0,j1_0,j2_0);
+  printf("i1_1,i2_1,j1_1,j2_1= %d %d %d %d\n", 
+   i1_1,i2_1,j1_1,j2_1);
+*/
+
+   /* printf("j1_0,j1_1= %d %d\n",j1_0,j1_1);  */
+   for (j1=j1_0,l1234_2=l1234_1;j1<j1_1;j1++,
+    j2_0=j1,j2_1=j2_0+doffset[j1])
+   {
+    /* printf("j2_0,j2_1= %d %d\n",j2_0,j2_1); */
+    if(xx==0)
+    {
+     j3_0=j1-offset_l2[j1];
+     j3_1=j3_0+doffset2[j1];
+     j4_0=j3_0;
+     j4_1=j3_1;
+    }
+    xx=0;
+    for (j2=j2_0;j2<j2_1;j2++,
+     j3_0=j1-offset_l2[j1],j3_1=j3_0+doffset2[j1],j4_0=j3_0,j4_1=j3_1)
+    {
+     /* printf("j3_0,j3_1= %d %d\n",j3_0,j3_1);  */
+     for (j3=j3_0;j3<j3_1;j3++,j4_0=j3)
+     {
+      /* printf("j4_0,j4_1= %d %d\n",j4_0,j4_1); */
+      for (j4=j4_0;j4<j4_1;j4++,l1234_2++)
+      {
+
+/*
+  printf("i1,i2,i3,i4= %d %d %d %d,  ", 
+   i1+1,i2+1,i3+1,i4+1);
+  printf("j1,j2,j3,j4= %d %d %d %d\n", 
+   j1+1,j2+1,j3+1,j4+1);
+*/
+
+     for(m1=0;m1<5;m1++) {
+      for(m2=0;m2<5;m2++) {
+       f[m1][m2]=0.;
+      }
+     }
+
+     for(m1=0;m1<5;m1++) {
+       {
+       m2=m1;
+       for(k=0;k<3;k++) {
+        for(l=0;l<3;l++) {
+         f[m1][m2]+=
+          l1234_1->dphidm1[m1][k] *
+          objptr->idunion.mca_p2.Fb[i1][j1].f[k][l]  *
+          l1234_2->dphidm1[m2][l];
+         f[m1][m2]+=
+          l1234_1->dphidm1[m1][k] *
+          objptr->idunion.mca_p2.Fb[i1][j2].f[k][l]  *
+          l1234_2->dphidm2[m2][l];
+         f[m1][m2]+=
+          l1234_1->dphidm1[m1][k] *
+          objptr->idunion.mca_p2.Fb[i1][j3].f[k][l]  *
+          l1234_2->dphidm3[m2][l];
+         f[m1][m2]+=
+          l1234_1->dphidm1[m1][k] *
+          objptr->idunion.mca_p2.Fb[i1][j4].f[k][l]  *
+          l1234_2->dphidm4[m2][l];
+         f[m1][m2]+=
+          l1234_1->dphidm2[m1][k] *
+          objptr->idunion.mca_p2.Fb[i2][j1].f[k][l]  *
+          l1234_2->dphidm1[m2][l];
+         f[m1][m2]+=
+          l1234_1->dphidm2[m1][k] *
+          objptr->idunion.mca_p2.Fb[i2][j2].f[k][l]  *
+          l1234_2->dphidm2[m2][l];
+         f[m1][m2]+=
+          l1234_1->dphidm2[m1][k] *
+          objptr->idunion.mca_p2.Fb[i2][j3].f[k][l]  *
+          l1234_2->dphidm3[m2][l];
+         f[m1][m2]+=
+          l1234_1->dphidm2[m1][k] *
+          objptr->idunion.mca_p2.Fb[i2][j4].f[k][l]  *
+          l1234_2->dphidm4[m2][l];
+         f[m1][m2]+=
+          l1234_1->dphidm3[m1][k] *
+          objptr->idunion.mca_p2.Fb[i3][j1].f[k][l]  *
+          l1234_2->dphidm1[m2][l];
+         f[m1][m2]+=
+          l1234_1->dphidm3[m1][k] *
+          objptr->idunion.mca_p2.Fb[i3][j2].f[k][l]  *
+          l1234_2->dphidm2[m2][l];
+         f[m1][m2]+=
+          l1234_1->dphidm3[m1][k] *
+          objptr->idunion.mca_p2.Fb[i3][j3].f[k][l]  *
+          l1234_2->dphidm3[m2][l];
+         f[m1][m2]+=
+          l1234_1->dphidm3[m1][k] *
+          objptr->idunion.mca_p2.Fb[i3][j4].f[k][l]  *
+          l1234_2->dphidm4[m2][l];
+         f[m1][m2]+=
+          l1234_1->dphidm4[m1][k] *
+          objptr->idunion.mca_p2.Fb[i4][j1].f[k][l]  *
+          l1234_2->dphidm1[m2][l];
+         f[m1][m2]+=
+          l1234_1->dphidm4[m1][k] *
+          objptr->idunion.mca_p2.Fb[i4][j2].f[k][l]  *
+          l1234_2->dphidm2[m2][l];
+         f[m1][m2]+=
+          l1234_1->dphidm4[m1][k] *
+          objptr->idunion.mca_p2.Fb[i4][j3].f[k][l]  *
+          l1234_2->dphidm3[m2][l];
+         f[m1][m2]+=
+          l1234_1->dphidm4[m1][k] *
+          objptr->idunion.mca_p2.Fb[i4][j4].f[k][l]  *
+          l1234_2->dphidm4[m2][l];
+
+        }
+       }
+      }
+     }
+
+     scp=0.;
+     scp+=f[0][0];
+     scp+=2.*f[1][1];
+     scp+=2.*f[2][2];
+     scp+=2.*f[3][3];
+     scp+=2.*f[4][4];
+     *objptr->idunion.mca_p2.f2 += weight*scp/((_REAL)5);
+     objptr->idunion.mca_p2.f2++;
+
+     scp=0.;
+     scp+=l1234_1->phi[0]*l1234_2->phi[0];
+     scp+=2.*l1234_1->phi[1]*l1234_2->phi[1];
+     scp+=2.*l1234_1->phi[2]*l1234_2->phi[2];
+     scp+=2.*l1234_1->phi[3]*l1234_2->phi[3];
+     scp+=2.*l1234_1->phi[4]*l1234_2->phi[4];
+     *objptr->idunion.mca_p2.s2 += weight*scp/((_REAL)5);
+     objptr->idunion.mca_p2.s2++;
+
+
+      }
+     }
+    }
+   }
+      }
+     }
+    }
+   }
+   objptr->idunion.mca_p2.s2 -= objptr->idunion.mca_p2.dim2;
+   objptr->idunion.mca_p2.f2 -= objptr->idunion.mca_p2.dim2;
+
+}
+
+/************************************************************************/
+
+void
+write_first_p2(idstruct *dptr)
+{
+	int	i,j,k,l,m,i2,j2,bytes;
+	int	states = dptr->idunion.mca_p2.cases;
+	FILE 	*file = dptr->idunion.mca_p2.file,*dump;
+        idstruct *bptr=dptr->idunion.mca_p2.bead;
+
+	_REAL fact;
+
+        int n1,n2,nn,nf,rank,mm;
+        _REAL **F,**S,**Fm1,*w,**tmp,**F0,**tmp0;
+        _REAL sum,sum2,tol,RKR;
+        _REAL *u,*v;
+#ifdef IMSL
+        d_complex *vi,*wi;
+#else
+        _REAL *vi;
+#endif
+
+	fact = 1./ dptr->idunion.mca_p2.casesw;
+
+        printf("write_first: number of states: %d, fact= %e\n",states,fact);
+
+        for (i=1; i<=dptr->idunion.mca_p2.n1; i++) {
+         for (j=i; j<=dptr->idunion.mca_p2.n1; j++) {
+           *dptr->idunion.mca_p2.s1++ *= fact;
+           *dptr->idunion.mca_p2.f1++ *= fact;
+         }
+        }
+        dptr->idunion.mca_p2.f1 -= dptr->idunion.mca_p2.dim1;
+        dptr->idunion.mca_p2.s1 -= dptr->idunion.mca_p2.dim1;
+
+        if(dptr->idunion.mca_p2.order==2)
+        {
+
+        for (i=1; i<=dptr->idunion.mca_p2.n1; i++) {
+         for (j=1; j<=dptr->idunion.mca_p2.n2; j++) {
+           *dptr->idunion.mca_p2.s12++ *= fact;
+           *dptr->idunion.mca_p2.f12++ *= fact;
+         }
+        }
+        dptr->idunion.mca_p2.s12 -= dptr->idunion.mca_p2.dim12;
+        dptr->idunion.mca_p2.f12 -= dptr->idunion.mca_p2.dim12;
+        for (i=1; i<=dptr->idunion.mca_p2.n2; i++) {
+         for (j=i; j<=dptr->idunion.mca_p2.n2; j++) {
+           *dptr->idunion.mca_p2.s2++ *= fact;
+           *dptr->idunion.mca_p2.f2++ *= fact;
+         }
+        }
+        dptr->idunion.mca_p2.s2 -= dptr->idunion.mca_p2.dim2;
+        dptr->idunion.mca_p2.f2 -= dptr->idunion.mca_p2.dim2;
+
+        }
+
+        if(dptr->idunion.mca_p2.dump==1) {
+         dump=fopen("fsI.dump","w");
+ 	 bytes=sizeof(_REAL)*dptr->idunion.mca_p2.dim1;
+         fwrite(&bytes,sizeof(int),1,dump);
+         fwrite(dptr->idunion.mca_p2.f1,dptr->idunion.mca_p2.dim1*sizeof(_REAL),
+                1,dump);
+         fwrite(&bytes,sizeof(int),1,dump);
+         fwrite(&bytes,sizeof(int),1,dump);
+         fwrite(dptr->idunion.mca_p2.s1,dptr->idunion.mca_p2.dim1*sizeof(_REAL),
+                1,dump);
+         fwrite(&bytes,sizeof(int),1,dump);
+         if(dptr->idunion.mca_p2.order==2)
+	 {
+   	  bytes=sizeof(_REAL)*dptr->idunion.mca_p2.dim12;
+          fwrite(&bytes,sizeof(int),1,dump);
+          fwrite(dptr->idunion.mca_p2.f12,dptr->idunion.mca_p2.dim12*sizeof(_REAL),
+                 1,dump);
+          fwrite(&bytes,sizeof(int),1,dump);
+          fwrite(&bytes,sizeof(int),1,dump);
+          fwrite(dptr->idunion.mca_p2.s12,dptr->idunion.mca_p2.dim12*sizeof(_REAL),
+                 1,dump);
+          fwrite(&bytes,sizeof(int),1,dump);
+ 	  bytes=sizeof(_REAL)*dptr->idunion.mca_p2.dim2;
+          fwrite(&bytes,sizeof(int),1,dump);
+          fwrite(dptr->idunion.mca_p2.f2,dptr->idunion.mca_p2.dim2*sizeof(_REAL),
+                 1,dump);
+          fwrite(&bytes,sizeof(int),1,dump);
+          fwrite(&bytes,sizeof(int),1,dump);
+          fwrite(dptr->idunion.mca_p2.s2,dptr->idunion.mca_p2.dim2*sizeof(_REAL),
+                 1,dump);
+          fwrite(&bytes,sizeof(int),1,dump);
+	 }
+         fflush(dump);
+         fclose(dump);
+        }
+
+        printf("S/F matrix elements written as binary fortran.\n");
+	/*
+	*/
+        printf("Now code stops before relaxation modes.\n");
+	return;
+
+/* invert F */
+        n1 = dptr->idunion.mca_p2.n1;
+        n2 = dptr->idunion.mca_p2.n2;
+        nn = dptr->idunion.mca_p2.nn;
+        F = matrix(1,nn,1,nn);
+        S = matrix(1,nn,1,nn);
+
+        for(i=1;i<=n1;i++) {
+         for(j=i;j<=n1;j++) {
+          F[i][j]=(*dptr->idunion.mca_p2.f1++);
+          F[j][i]=F[i][j];
+          S[i][j]=*dptr->idunion.mca_p2.s1++;
+          S[j][i]=S[i][j];
+         }
+        }
+        dptr->idunion.mca_p2.s1 -= dptr->idunion.mca_p2.dim1;
+        dptr->idunion.mca_p2.f1 -= dptr->idunion.mca_p2.dim1;
+
+        if(dptr->idunion.mca_p2.order==2)
+        {
+
+        for(i=1;i<=n1;i++) {
+         for(j=1;j<=n2;j++) {
+          j2=n1+j;
+          F[i][j2]=(*dptr->idunion.mca_p2.f12++);
+          F[j2][i]=F[i][j2];
+          S[i][j2]=*dptr->idunion.mca_p2.s12++;
+          S[j2][i]=S[i][j2];
+         }
+        }
+        dptr->idunion.mca_p2.s12 -= dptr->idunion.mca_p2.dim12;
+        dptr->idunion.mca_p2.f12 -= dptr->idunion.mca_p2.dim12;
+
+        for(i=1;i<=n2;i++) {
+         for(j=i;j<=n2;j++) {
+          i2=n1+i;
+          j2=n1+j;
+          F[i2][j2]=(*dptr->idunion.mca_p2.f2++);
+          F[j2][i2]=F[i2][j2];
+          S[i2][j2]=*dptr->idunion.mca_p2.s2++;
+          S[j2][i2]=S[i2][j2];
+         }
+        }
+        dptr->idunion.mca_p2.s2 -= dptr->idunion.mca_p2.dim2;
+        dptr->idunion.mca_p2.f2 -= dptr->idunion.mca_p2.dim2;
+
+        }
+/*
+*/
+        fprintf(file,"S,F:\n");
+        for(i=1;i<=nn;i++)
+         for(j=1;j<=nn;j++)
+          fprintf(file,"%d %d %e %e\n",i,j,S[i][j],F[i][j]);
+        fflush(file);
+
+        for(i=1;i<=nn;i++) {
+         if(S[i][i]<ZERO) {
+          printf("write_first:\n");
+          printf("S element is wrong: S(%d,%d) = %e\n",i,i,S[i][i]);
+         }
+        }
+
+        Fm1 = matrix(1,nn,1,nn);
+        dptr->idunion.mca_p2.eval = (_REAL *)
+         get2(dptr->idunion.mca_p2.nn,sizeof(_REAL));
+        dptr->idunion.mca_p2.evec = matrix(
+              1,dptr->idunion.mca_p2.nn,
+              1,dptr->idunion.mca_p2.nn);
+#ifdef IMSL
+        tol = TOLSVD;
+        u = vector(0,nn*nn-1);
+        for(i=1,k=0;i<=nn;i++)
+         for(j=1;j<=nn;j++,k++)
+          u[k]=F[i][j];
+        w = imsl_d_lin_svd_gen(nn,nn,u,
+              IMSL_RANK, tol, &rank,
+              IMSL_INVERSE,&v,0);
+        free(w);
+        for(i=1,k=0;i<=nn;i++) {
+         for(j=1;j<=nn;j++,k++) {
+          Fm1[i][j]=v[k];
+         }
+        }
+        free(v);
+#else
+        rank=invert(F,nn,nn,Fm1);
+#endif
+        fprintf(file,"rank of F: %d\n",rank);
+
+        tmp = matrix(1,nn,1,nn);
+        for(i=1;i<=nn;i++) {
+         for(j=1;j<=nn;j++) {
+          for(k=1,sum=0.;k<=nn;k++) {
+           sum+=Fm1[i][k]*S[k][j];
+          }
+          tmp[i][j]=sum;
+         }
+        }
+
+        for(i=1;i<=nn;i++) {
+         for(j=1;j<=nn;j++) {
+          for(k=1,sum=0.;k<=nn;k++) {
+           sum+=S[i][k]*tmp[k][j];
+          }
+          Fm1[i][j]=sum;
+         }
+        }
+
+        for(i=1;i<=nn;i++) {
+         if(Fm1[i][i]<=ZERO) {
+          printf("write_first:\n");
+          printf("SF^-1S diagonal element is wrong: F(%d,%d) = %e\n",
+           i,i,Fm1[i][i]);
+         }
+         if(Nabs(S[i][i])>ZERO) {
+          Fm1[i][i] /= S[i][i];
+         }
+        }
+
+        for(i=1;i<=nn;i++) {
+         fprintf(file,"tau(%d)= %e ",i,1.*Fm1[i][i]);
+         fprintf(file,"%e\n",bptr->idunion.bead.factns*Fm1[i][i]);
+        }
+        fflush(file);
+
+#ifdef IMSL
+        tol = TOLSVD;
+        u = vector(0,nn*nn-1);
+        if(dptr->idunion.mca_p2.rigid==0) {
+         for(i=1,k=0;i<=nn;i++)
+          for(j=1;j<=nn;j++,k++)
+           u[k]=S[i][j];
+        } else {
+         for(i=1,k=0;i<=nn;i++)
+          for(j=1;j<=nn;j++,k++)
+           u[k]=F[i][j];
+        }
+        w = imsl_d_lin_svd_gen(nn,nn,u,
+              IMSL_RANK, tol, &rank,
+              IMSL_INVERSE,&v,0);
+        free(w);
+        for(i=1,k=0;i<=nn;i++) {
+         for(j=1;j<=nn;j++,k++) {
+          Fm1[i][j]=v[k];
+         }
+        }
+        free(v);
+#else
+        if(dptr->idunion.mca_p2.rigid==0) {
+         rank=invert(S,nn,nn,Fm1);
+        } else {
+         rank=invert(F,nn,nn,Fm1);
+        }
+#endif
+        fprintf(file,"rank of S: %d\n",rank);
+
+/*
+        fprintf(file,"Sm1*S:\n");
+        for(i=1;i<=nn;i++) {
+         for(j=1;j<=nn;j++) {
+          for(k=1,sum=0.;k<=nn;k++) {
+           sum+=Fm1[i][k]*S[k][j];
+          }
+          fprintf(file,"%d %d %e\n",i,j,sum);
+          fflush(file);
+         }
+        }
+*/
+
+        /* tmp0 = matrix(1,nn,1,nn); */
+
+        if(dptr->idunion.mca_p2.rigid==0) {
+
+        for(i=1;i<=nn;i++) {
+         for(j=1;j<=nn;j++) {
+          for(k=1,sum=0.,sum2=0.;k<=nn;k++) {
+           sum+=Fm1[i][k]*F[k][j];
+           /* sum2+=Fm1[i][k]*F0[k][j]; */
+          }
+          tmp[i][j]=sum;
+          /* tmp0[i][j]=sum2; */
+         }
+        }
+
+        } else {
+
+        for(i=1;i<=nn;i++) {
+         for(j=1;j<=nn;j++) {
+          for(k=1,sum=0.;k<=nn;k++) {
+           sum+=Fm1[i][k]*S[k][j];
+          }
+          tmp[i][j]=sum;
+         }
+        }
+
+        }
+
+/* diagonalize A = S-1*F or A = F^-1*S if rigidi */
+        
+        w=vector(1,nn);
+#ifdef IMSL
+        for(i=1,k=0;i<=nn;i++) {
+         for(j=1;j<=nn;j++,k++) {
+          u[k]=tmp[i][j];
+         }
+        }
+        wi = imsl_d_eig_gen(nn,u,IMSL_VECTORS,&vi,0);
+        if(dptr->idunion.mca_p2.rigid==0) {
+         for(i=0;i<nn;i++) {
+          w[i+1] = 1./wi[i].re;
+         }
+        } else {
+         for(i=0;i<nn;i++) {
+          w[i+1] = wi[i].re;
+         }
+        }
+        free(wi);
+        free_vector(u,0,nn*nn-1);
+#else
+        vi = (_REAL *)get2(nn*nn,sizeof(_REAL));
+#ifdef EISPACK
+        eigvec_ev(nn,tmp,vi,w);
+        if(dptr->idunion.mca_p2.rigid==0) {
+         for(i=0;i<nn;i++) {
+          w[i+1] = 1./w[i+1];
+         }
+        }
+#else
+        eigvec_nr(tmp,nn,w,vi);
+#endif
+#endif
+        for(i=1,sum=0.,fact=0.,nf=0;i<=nn;i++) {
+         sum+=w[i];
+         if(Nabs(w[i])>ZERO)
+         {
+          nf++;
+          fprintf(file,"lambda2(%d)= %e\n",i,1./w[i]);
+          fact+= w[i];
+         }
+        }
+        fprintf(file,"\n"); fflush(file);
+
+        for(i=1,k=0;i<=nn;i++) {
+         for(j=1;j<=nn;j++,k++) {
+#ifdef IMSL
+          dptr->idunion.mca_p2.evec[i][j] = vi[k].re;
+#else
+          dptr->idunion.mca_p2.evec[i][j] = vi[k];
+#endif
+         }
+        }
+        eigsrt(w,dptr->idunion.mca_p2.evec,nn);
+        for(i=1;i<=nn;i++) {
+         dptr->idunion.mca_p2.eval[i-1] = 1./w[i];
+        }
+/*
+        free_vector(w,1,nn);
+        free(vi);
+*/
+
+
+        if(dptr->idunion.mca_p2.type==1) {
+         nf=nn;
+        } if(dptr->idunion.mca_p2.type==2) {
+         nf=dptr->idunion.mca_p2.sel_modes;
+        }
+
+        if(dptr->idunion.mca_p2.rigid==1) {
+         if(dptr->idunion.mca_p2.type==1) {
+          nf=5;
+         } if(dptr->idunion.mca_p2.type==2) {
+          nf=dptr->idunion.mca_p2.sel_modes;
+         }
+        }
+
+        dptr->idunion.mca_p2.nf = nf;
+/*
+        dptr->idunion.mca_p2.dim1=
+         dptr->idunion.mca_p2.nf*(dptr->idunion.mca_p2.nf+1)/2;
+*/
+/*
+        dptr->idunion.mca_p2.dim1=
+         dptr->idunion.mca_p2.n1*(dptr->idunion.mca_p2.n1+1)/2;
+        free(dptr->idunion.mca_p2.s1);
+        free(dptr->idunion.mca_p2.f1);
+        dptr->idunion.mca_p2.s1 = (_REAL *)
+          get2(dptr->idunion.mca_p2.dim1,sizeof(_REAL));
+        dptr->idunion.mca_p2.f1 = (_REAL *)
+          get2(dptr->idunion.mca_p2.dim1,sizeof(_REAL));
+        for(i=0;i<dptr->idunion.mca_p2.dim1;i++) {
+         *dptr->idunion.mca_p2.s1++ =0.;
+         *dptr->idunion.mca_p2.f1++ =0.;
+        }
+        dptr->idunion.mca_p2.s1-=dptr->idunion.mca_p2.dim1;
+        dptr->idunion.mca_p2.f1-=dptr->idunion.mca_p2.dim1;
+*/
+
+        /* nn=bptr->idunion.bead.nbond; */
+
+        for(i=1;i<=nn;i++) {
+         for(j=1;j<=nn;j++) {
+          for(k=1,sum=0.;k<=nn;k++) {
+           sum+=S[i][k]*dptr->idunion.mca_p2.evec[k][j];
+          }
+          tmp[i][j]=sum;
+         }
+        }
+        for(i=1;i<=nn;i++) {
+         for(j=1;j<=nn;j++) {
+          for(k=1,sum=0.;k<=nn;k++) {
+           sum+=dptr->idunion.mca_p2.evec[k][i]*tmp[k][j];
+          }
+          Fm1[i][j]=sum;
+         }
+        }
+/*
+        fprintf(file,"Ct*S(I)*C:\n");
+        for(i=1;i<=nn;i++) {
+         for(j=1;j<=nn;j++) {
+          fprintf(file,"%d %d %e\n",i,j,Fm1[i][j]);
+         }
+        }
+        fflush(file);
+*/
+
+/* normalize eigenvectors to Ct*S*C=I */
+        for(j=1,k=0;j<=nn;j++) {
+         if(Nabs(Fm1[j][j]) > ZERO) {
+          k++;
+          sum=Fm1[j][j];
+         } else {
+          sum=1.;
+         }
+         sum=l_sqrt(sum);
+         for(i=1;i<=nn;i++) {
+          dptr->idunion.mca_p2.evec[i][j]/=sum;
+         }
+        }
+        if(k!=nf) {
+         printf("write_first: missed zero in Ct*S*C.\n");
+        }
+/*
+#ifdef IMSL
+
+#endif
+
+#ifdef EISPACK
+        adjust_ev(nn,Fm1,tmp,dptr->idunion.mca_p2.evec);
+#endif
+*/
+
+/*
+        fprintf(file,"write_first:C:\n");
+        for(j=1;j<=nn;j++) {
+         for(i=1;i<=nn;i++) {
+          fprintf(file,"evec(%d,%d)= %e\n",i,j,dptr->idunion.mca_p2.evec[i][j]);
+         }
+        }
+        fflush(file);
+*/
+
+/* transform F in Ct*F*C and S in Ct*S*C */
+        for(i=1;i<=nn;i++) {
+         for(j=1;j<=nn;j++) {
+          for(k=1,sum=0.;k<=nn;k++) {
+           sum+=F[i][k]*dptr->idunion.mca_p2.evec[k][j];
+          }
+          tmp[i][j]=sum;
+         }
+        }
+        for(i=1;i<=nn;i++) {
+         for(j=1;j<=nn;j++) {
+          for(k=1,sum=0.;k<=nn;k++) {
+           sum+=dptr->idunion.mca_p2.evec[k][i]*tmp[k][j];
+          }
+          F[i][j]=sum;
+         }
+        }
+/*
+        fprintf(file,"Ct*F1*C:\n");
+        for(i=1;i<=nn;i++) {
+         for(j=1;j<=nn;j++) {
+          fprintf(file,"%d %d %e\n",i,j,F[i][j]);
+         }
+        }
+        fflush(file);
+*/
+
+/*
+        for(i=1;i<=dptr->idunion.mca_p2.n1;i++) {
+         for(j=i;j<=dptr->idunion.mca_p2.n1;j++) {
+          *dptr->idunion.mca_p2.f1++ = F[i][j];
+         }
+        }
+        dptr->idunion.mca_p2.f1 -= dptr->idunion.mca_p2.dim1;
+*/
+
+        for(i=1;i<=nn;i++) {
+         for(j=1;j<=nn;j++) {
+          for(k=1,sum=0.;k<=nn;k++) {
+           sum+=S[i][k]*dptr->idunion.mca_p2.evec[k][j];
+          }
+          tmp[i][j]=sum;
+         }
+        }
+/*
+        fprintf(file,"S1*C:\n");
+        for(i=1;i<=nn;i++) {
+         for(j=1;j<=nn;j++) {
+          fprintf(file,"%d %d %e\n",i,j,tmp[i][j]);
+         }
+        }
+        fflush(file);
+*/
+
+        for(i=1;i<=nn;i++) {
+         for(j=1;j<=nn;j++) {
+          for(k=1,sum=0.;k<=nn;k++) {
+           sum+=dptr->idunion.mca_p2.evec[k][i]*tmp[k][j];
+          }
+          S[i][j]=sum;
+         }
+        }
+
+/*
+        fprintf(file,"Ct*S1*C:\n");
+        for(i=1;i<=nn;i++) {
+         for(j=1;j<=nn;j++) {
+          fprintf(file,"%d %d %e\n",i,j,S[i][j]);
+         }
+        }
+        fflush(file);
+*/
+
+/*
+        for(i=1;i<=dptr->idunion.mca_p2.n1;i++) {
+         for(j=i;j<=dptr->idunion.mca_p2.n1;j++) {
+          *dptr->idunion.mca_p2.s1++ = S[i][j];
+         }
+        }
+        dptr->idunion.mca_p2.s1 -= dptr->idunion.mca_p2.dim1;
+*/
+
+        free_matrix(F,1,nn,1,nn);
+        free_matrix(S,1,nn,1,nn);
+        free_matrix(Fm1,1,nn,1,nn);
+        free_matrix(tmp,1,nn,1,nn);
+}

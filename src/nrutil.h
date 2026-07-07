@@ -1,0 +1,17 @@
+_REAL *vector();
+_REAL **matrix();
+rdiadstruct **rdiad_matrix();
+_REAL **convert_matrix();
+fcomplex **Cmatrix();
+int *ivector();
+int **imatrix();
+_REAL **submatrix();
+void free_vector();
+void free_dvector();
+void free_ivector();
+void free_matrix();
+void free_dmatrix();
+void free_imatrix();
+void free_submatrix();
+void free_convert_matrix();
+void nrerror();
